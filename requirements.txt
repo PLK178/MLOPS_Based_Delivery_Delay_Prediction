@@ -8,5 +8,8 @@ scikit-learn
 matplotlib
 seaborn
 jupyter
-
-
+ipykernel
+xgboost
+catboost
+lightgbm
+PyYAML
