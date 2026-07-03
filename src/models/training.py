@@ -111,6 +111,8 @@ def train_model(model_name, params, X, y, cv_params, categorical_features):
         X_train_trans = preprocessor.fit_transform(X_train, y_train)
         X_val_trans = preprocessor.transform(X_val)
         
+
+        
         # Copy model params
         model_params = params.copy()
         early_stopping_rounds = model_params.pop("early_stopping_rounds", None)
