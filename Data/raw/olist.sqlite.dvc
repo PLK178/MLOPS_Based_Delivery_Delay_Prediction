@@ -1,0 +1,5 @@
+outs:
+- md5: 2c14ac58d73f4d2053bac33ab6b232d9
+  size: 112701440
+  hash: md5
+  path: olist.sqlite
