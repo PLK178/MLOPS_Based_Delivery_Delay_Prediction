@@ -13,3 +13,4 @@ xgboost
 catboost
 lightgbm
 PyYAML
+imbalanced-learn
