@@ -24,18 +24,16 @@ import xgboost as xgb
 import catboost as cb
 import lightgbm as lgb
 import mlflow
+import dagshub
 
-from src.evaluation.evaluation import (
-    calculate_classification_metrics,
-    save_plots
+from src.Model_evaluation.evaluation import (
+    calculate_classification_metrics
 )
 
 # Constants
 PROJECT_ROOT = "/home/likith/mlops/MLOPS"
 CONFIG_PATH = os.path.join(PROJECT_ROOT, "configs/model_config.yaml")
 MODELS_DIR = os.path.join(PROJECT_ROOT, "models")
-PLOTS_DIR = os.path.join(PROJECT_ROOT, "plots")
-RESULTS_DIR = os.path.join(PROJECT_ROOT, "results")
 
 # Mapping model names to classification classes
 MODEL_CLASSES = {
@@ -79,11 +77,87 @@ def get_preprocessing_pipeline(numerical_cols, categorical_cols):
     
     return preprocessor
 
-def train_model(model_name, params, X, y, cv_params, categorical_features):
-    """Train a single classification model using cross-validation and log results."""
+def tune_hyperparameters(model_name, static_params, param_grid, X, y, cv_params, categorical_features):
+    """Perform a grid search over param_grid using a subset CV split for speed."""
+    from sklearn.model_selection import ParameterGrid
+    grid = list(ParameterGrid(param_grid))
+    
+    if len(grid) <= 1:
+        return grid[0] if grid else {}
+        
+    print(f"🔍 Tuning hyperparameters for {model_name} (evaluating {len(grid)} combinations)...")
+    best_score = -1.0
+    best_params = grid[0]
+    
+    # 3-fold split for faster hyperparameter search
+    cv = StratifiedKFold(n_splits=3, shuffle=True, random_state=42)
+    numerical_cols = [c for c in X.columns if c not in categorical_features]
+    model_class = MODEL_CLASSES[model_name]
+    
+    for params_combo in grid:
+        scores = []
+        full_params = {**static_params, **params_combo}
+        
+        # Pop early stopping and other train-only params
+        early_stopping_rounds = full_params.pop("early_stopping_rounds", None)
+        
+        for train_idx, val_idx in cv.split(X, y):
+            X_train, y_train = X.iloc[train_idx], y.iloc[train_idx]
+            X_val, y_val = X.iloc[val_idx], y.iloc[val_idx]
+            
+            preprocessor = get_preprocessing_pipeline(numerical_cols, categorical_features)
+            X_train_trans = preprocessor.fit_transform(X_train, y_train)
+            X_val_trans = preprocessor.transform(X_val)
+            
+            if model_name == "adaboost":
+                base_model = model_class(**full_params, estimator=DecisionTreeClassifier(max_depth=1, class_weight='balanced'))
+            else:
+                base_model = model_class(**full_params)
+                
+            if model_name in ["xgboost", "catboost", "lightgbm"] and early_stopping_rounds:
+                if model_name == "xgboost":
+                    base_model.set_params(early_stopping_rounds=early_stopping_rounds)
+                    base_model.fit(X_train_trans, y_train, eval_set=[(X_val_trans, y_val)], verbose=False)
+                elif model_name == "catboost":
+                    base_model.fit(X_train_trans, y_train, eval_set=(X_val_trans, y_val), early_stopping_rounds=early_stopping_rounds, verbose=False)
+                elif model_name == "lightgbm":
+                    callbacks = [lgb.early_stopping(stopping_rounds=early_stopping_rounds, verbose=False)]
+                    base_model.fit(X_train_trans, y_train, eval_set=[(X_val_trans, y_val)], callbacks=callbacks)
+            else:
+                if model_name == "gradient_boosting":
+                    from sklearn.utils.class_weight import compute_sample_weight
+                    sample_weight = compute_sample_weight(class_weight='balanced', y=y_train)
+                    base_model.fit(X_train_trans, y_train, sample_weight=sample_weight)
+                else:
+                    base_model.fit(X_train_trans, y_train)
+                    
+            pipeline = Pipeline(steps=[
+                ('preprocessor', preprocessor),
+                ('model', base_model)
+            ])
+            val_preds = pipeline.predict(X_val)
+            score = f1_score(y_val, val_preds, zero_division=0)
+            scores.append(score)
+            
+        mean_score = np.mean(scores)
+        if mean_score > best_score:
+            best_score = mean_score
+            best_params = params_combo
+            
+    print(f"🎯 Best combination for {model_name}: {best_params} (Mean CV F1: {best_score:.6f})")
+    return best_params
+
+def train_model(model_name, static_params, param_grid, X, y, cv_params, categorical_features, experiment_name):
+    """Tune and then train a single classification model using cross-validation and log results."""
     print(f"\n==================================================")
     print(f"🚀 Training {model_name.upper()} (classification)")
     print(f"==================================================")
+    
+    # 1. Hyperparameter Tuning
+    best_tuned_params = tune_hyperparameters(model_name, static_params, param_grid, X, y, cv_params, categorical_features)
+    
+    # 2. Re-combine static and best tuned params for final cross-validated training
+    final_params = {**static_params, **best_tuned_params}
     
     n_splits = cv_params.get("n_splits", 5)
     shuffle = cv_params.get("shuffle", True)
@@ -111,10 +185,8 @@ def train_model(model_name, params, X, y, cv_params, categorical_features):
         X_train_trans = preprocessor.fit_transform(X_train, y_train)
         X_val_trans = preprocessor.transform(X_val)
         
-
-        
         # Copy model params
-        model_params = params.copy()
+        model_params = final_params.copy()
         early_stopping_rounds = model_params.pop("early_stopping_rounds", None)
         
         # Instantiate base estimator
@@ -189,37 +261,14 @@ def train_model(model_name, params, X, y, cv_params, categorical_features):
     for k, v in tuned_metrics.items():
         print(f"  - {k.upper()}: {v:.6f}")
     
-    # Save plots (Use tuned predictions so the confusion matrix is balanced and meaningful)
-    save_plots(y, oof_preds_tuned, oof_probs, "classification", PLOTS_DIR)
-    
-    # Rename output plots to prefix them with model name
-    if os.path.exists(os.path.join(PLOTS_DIR, "confusion_matrix.png")):
-        os.replace(os.path.join(PLOTS_DIR, "confusion_matrix.png"), os.path.join(PLOTS_DIR, f"{model_name}_confusion_matrix.png"))
-    if os.path.exists(os.path.join(PLOTS_DIR, "roc_curve.png")):
-        os.replace(os.path.join(PLOTS_DIR, "roc_curve.png"), os.path.join(PLOTS_DIR, f"{model_name}_roc_curve.png"))
-            
-    # Save OOF predictions, probabilities and overall metrics to results
-    np.save(os.path.join(RESULTS_DIR, f"{model_name}_oof_preds.npy"), oof_preds_tuned)
-    np.save(os.path.join(RESULTS_DIR, f"{model_name}_oof_probs.npy"), oof_probs)
-    
-    # Save metrics JSON
-    metrics_path = os.path.join(RESULTS_DIR, f"{model_name}_metrics.yaml")
-    with open(metrics_path, "w") as f:
-        yaml_metrics = {
-            "best_threshold": float(best_thresh),
-            "default_threshold_0.50": {k: float(v) if isinstance(v, (np.float64, np.float32)) else v for k, v in default_metrics.items()},
-            "tuned_threshold": {k: float(v) if isinstance(v, (np.float64, np.float32)) else v for k, v in tuned_metrics.items()}
-        }
-        yaml.safe_dump(yaml_metrics, f)
-        
     # MLflow tracking
     try:
-        # Use SQLite backend for MLflow tracking to support standard MLflow 3.0+ usage
-        mlflow.set_tracking_uri(f"sqlite:///{PROJECT_ROOT}/mlflow.db")
-        mlflow.set_experiment("Olist_Delivery_Prediction")
+        # Initialize DagsHub MLflow tracking
+        dagshub.init(repo_owner='PLK178', repo_name='MLOPS', mlflow=True)
+        mlflow.set_experiment(experiment_name)
         with mlflow.start_run(run_name=f"{model_name}_classification"):
             # Log hyperparameters config
-            mlflow.log_params(params)
+            mlflow.log_params(final_params)
             mlflow.log_param("task_type", "classification")
             mlflow.log_param("n_splits", n_splits)
             mlflow.log_param("tuned_threshold", best_thresh)
@@ -236,11 +285,6 @@ def train_model(model_name, params, X, y, cv_params, categorical_features):
             for fold, model_path in enumerate(models):
                 mlflow.log_artifact(model_path, artifact_path="models")
                 
-            # Log plots as artifacts
-            mlflow.log_artifact(os.path.join(PLOTS_DIR, f"{model_name}_confusion_matrix.png"))
-            if os.path.exists(os.path.join(PLOTS_DIR, f"{model_name}_roc_curve.png")):
-                mlflow.log_artifact(os.path.join(PLOTS_DIR, f"{model_name}_roc_curve.png"))
-                
             print(f"✅ Logged to MLflow successfully under run name: {model_name}_classification")
     except Exception as e:
         print(f"⚠️ MLflow logging failed: {e}")
@@ -250,8 +294,6 @@ def train_model(model_name, params, X, y, cv_params, categorical_features):
 def main():
     # Make sure output dirs exist
     os.makedirs(MODELS_DIR, exist_ok=True)
-    os.makedirs(PLOTS_DIR, exist_ok=True)
-    os.makedirs(RESULTS_DIR, exist_ok=True)
     
     # 1. Load config
     print(f"📖 Loading config from {CONFIG_PATH}...")
@@ -299,16 +341,24 @@ def main():
     cv_params = config["cv"]
     configured_models = config["models"]
     
+    import datetime
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    experiment_name = f"Olist_Delivery_Prediction_{timestamp}"
+    print(f"🧪 Creating MLflow experiment: {experiment_name}")
+    
     summary = {}
     for model_name, model_config in configured_models.items():
-        params = model_config["params"]
+        static_params = model_config.get("static_params", {})
+        param_grid = model_config.get("param_grid", {})
         metrics = train_model(
             model_name=model_name,
-            params=params,
+            static_params=static_params,
+            param_grid=param_grid,
             X=X,
             y=y,
             cv_params=cv_params,
-            categorical_features=categorical_features
+            categorical_features=categorical_features,
+            experiment_name=experiment_name
         )
         summary[model_name] = metrics
         
@@ -318,9 +368,7 @@ def main():
     summary_df = pd.DataFrame(summary).T
     print(summary_df)
     
-    # Save training summary
-    summary_df.to_csv(os.path.join(RESULTS_DIR, "training_summary.csv"))
-    print(f"\n💾 Summary metrics saved to: {os.path.join(RESULTS_DIR, 'training_summary.csv')}")
+
 
 if __name__ == "__main__":
     main()
