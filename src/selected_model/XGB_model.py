@@ -9,6 +9,8 @@ from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.impute import SimpleImputer
 import xgboost as xgb
+import mlflow
+import dagshub
 
 from src.Model_evaluation.evaluation import (
     calculate_classification_metrics,
@@ -159,6 +161,57 @@ def main():
     # Save evaluation plots
     save_plots(y_test, tuned_preds, test_probs, task_type="classification", output_dir=PLOTS_DIR)
     print(f"📈 Saved evaluation plots to: {PLOTS_DIR}")
+
+    # 9. MLflow Tracking and Model Registry
+    try:
+        print("🧪 Initializing MLflow / DagsHub tracking...")
+        dagshub.init(repo_owner='PLK178', repo_name='MLOPS', mlflow=True)
+        mlflow.set_experiment("Olist_Delivery_Prediction")
+        
+        run_name = "XGB_Final_Model_Registration"
+        with mlflow.start_run(run_name=run_name) as run:
+            print("📝 Logging parameters and metrics to MLflow...")
+            # Log params
+            mlflow.log_params({
+                "n_estimators": 300,
+                "learning_rate": 0.05,
+                "max_depth": 6,
+                "random_state": 42,
+                "scale_pos_weight": 11.5,
+                "optimal_threshold": best_thresh
+            })
+            
+            # Log default threshold metrics
+            for k, v in default_metrics.items():
+                if not np.isnan(v):
+                    mlflow.log_metric(f"default_{k}", v)
+            
+            # Log tuned threshold metrics
+            for k, v in tuned_metrics.items():
+                if not np.isnan(v):
+                    mlflow.log_metric(f"tuned_{k}", v)
+            
+            # Log artifacts (plots and model file)
+            mlflow.log_artifact(model_save_path, artifact_path="models")
+            if os.path.exists(PLOTS_DIR):
+                mlflow.log_artifacts(PLOTS_DIR, artifact_path="plots")
+            
+            # Register the model to MLflow Model Registry
+            print("📦 Registering model in MLflow Model Registry...")
+            mlflow.sklearn.log_model(
+                sk_model=pipeline,
+                artifact_path="model",
+                registered_model_name="Olist_XGB_Model",
+                skops_trusted_types=[
+                    "numpy.dtype",
+                    "xgboost.core.Booster",
+                    "xgboost.sklearn.XGBClassifier"
+                ]
+            )
+            print("✅ Model successfully registered as 'Olist_XGB_Model'.")
+            
+    except Exception as e:
+        print(f"⚠️ MLflow/DagsHub logging & registration failed: {e}")
 
 if __name__ == "__main__":
     main()
