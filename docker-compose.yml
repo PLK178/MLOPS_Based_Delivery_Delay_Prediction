@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  # Container 1: FastAPI Python Backend
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mlops_backend
+    expose:
+      - "8000"
+    restart: unless-stopped
+    volumes:
+      # Optional: Mount database file to persist queries outside container
+      - ./predictions.db:/app/predictions.db
+    # Limit memory and CPU to keep it lightweight on your home server
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+
+  # Container 2: Nginx Static Frontend & API Reverse Proxy
+  frontend:
+    build:
+      context: ./templates
+      dockerfile: Dockerfile
+    container_name: mlops_frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 64M
