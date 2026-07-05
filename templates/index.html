@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Delivery Latency Predictor - MLOps</title>
+    <!-- Custom Vanilla Styling -->
+    <link rel="stylesheet" href="./style.css">
+    <!-- Lucide Icons Library -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+<body>
+
+    <!-- Header -->
+    <header>
+        <div class="header-container">
+            <div class="brand-section">
+                <div class="brand-icon-wrapper">
+                    <i data-lucide="clock" class="brand-icon"></i>
+                </div>
+                <div>
+                    <h1 class="brand-title">TransitRisk AI</h1>
+                    <p class="brand-subtitle">Real-time E-Commerce Delay Inference</p>
+                </div>
+            </div>
+            <div class="server-status">
+                <span class="status-dot-outer">
+                    <span class="status-dot-ping"></span>
+                    <span class="status-dot-inner"></span>
+                </span>
+                <span>Home Server Connected</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content Grid -->
+    <main>
+        
+        <!-- Left Side: Interactive Input Controls -->
+        <section class="main-column">
+            <!-- Sandbox Scenarios Panel -->
+            <div class="dashboard-card scenario-card">
+                <div class="card-title-section justify-between">
+                    <div class="flex items-center gap-2">
+                        <i data-lucide="sliders" class="card-icon"></i>
+                        <h2>Test Scenarios</h2>
+                    </div>
+                    <span class="scenario-helper-text">Quick-load presets</span>
+                </div>
+                <div class="scenario-buttons-grid">
+                    <button type="button" class="preset-btn" onclick="loadPreset('standard')">
+                        <i data-lucide="package" style="width:0.9rem; height:0.9rem"></i>
+                        <span>Standard Parcel</span>
+                    </button>
+                    <button type="button" class="preset-btn warning" onclick="loadPreset('heavy_delayed')">
+                        <i data-lucide="truck" style="width:0.9rem; height:0.9rem"></i>
+                        <span>Heavy Freight</span>
+                    </button>
+                    <button type="button" class="preset-btn success" onclick="loadPreset('express')">
+                        <i data-lucide="zap" style="width:0.9rem; height:0.9rem"></i>
+                        <span>Express Same-State</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Predictor Form -->
+            <div class="dashboard-card">
+                <form id="predictionForm">
+                    
+                    <!-- Section A: Route & Category -->
+                    <div class="form-section-title">
+                        <i data-lucide="navigation"></i>
+                        <span>Routing & Categorization</span>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label" for="product_category_name">
+                                <span>Product Category</span>
+                                <div class="tooltip-container">
+                                    <i data-lucide="info" class="info-icon"></i>
+                                    <span class="tooltip-text">Categories affect base custom transit times and handling speeds.</span>
+                                </div>
+                            </label>
+                            <select id="product_category_name" name="product_category_name" class="form-select">
+                                <option value="beleza_saude">Health & Beauty</option>
+                                <option value="informatica_acessorios">Computers & Accessories</option>
+                                <option value="utilidades_domesticas">Housewares</option>
+                                <option value="esporte_lazer">Sports & Leisure</option>
+                                <option value="relogios_presentes">Watches & Gifts</option>
+                                <option value="brinquedos">Toys</option>
+                                <option value="auto">Automotive</option>
+                                <option value="perfumaria">Perfumes</option>
+                                <option value="cool_stuff">Cool Stuff</option>
+                                <option value="moveis_decoracao">Furniture & Decor</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group" style="justify-content: flex-end;">
+                            <label class="checkbox-container">
+                                <input type="checkbox" id="is_same_state" name="is_same_state">
+                                <div class="checkbox-meta">
+                                    <span style="display:flex; align-items:center; gap:0.25rem">
+                                        Domestic State Route
+                                        <div class="tooltip-container">
+                                            <i data-lucide="info" class="info-icon"></i>
+                                            <span class="tooltip-text">Check if the seller and customer are in the same state to significantly cut transit times.</span>
+                                        </div>
+                                    </span>
+                                    <p>Bypasses major regional logistics hubs</p>
+                                </div>
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- Section B: Financial Metrics -->
+                    <div class="form-section-title">
+                        <i data-lucide="dollar-sign"></i>
+                        <span>Financial Metrics</span>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label" for="price">
+                                <span>Item Price ($)</span>
+                            </label>
+                            <input type="number" id="price" name="price" value="120.00" min="1" step="0.01" required class="form-input">
+                        </div>
+
+                        <div class="form-group">
+                            <label class="form-label" for="freight_value">
+                                <span>Freight Cost ($)</span>
+                                <div class="tooltip-container">
+                                    <i data-lucide="info" class="info-icon"></i>
+                                    <span class="tooltip-text">Higher freight costs usually reflect remote locations or heavier cargo.</span>
+                                </div>
+                            </label>
+                            <input type="number" id="freight_value" name="freight_value" value="19.50" min="0" step="0.01" required class="form-input">
+                        </div>
+                    </div>
+
+                    <!-- Section C: Package Telemetry -->
+                    <div class="form-section-title">
+                        <i data-lucide="box"></i>
+                        <span>Package Telemetry</span>
+                    </div>
+
+                    <div class="slider-group">
+                        <div class="slider-header">
+                            <label class="form-label">
+                                <span>Product Weight</span>
+                            </label>
+                            <span id="weightVal" class="slider-badge">850 g</span>
+                        </div>
+                        <input type="range" id="product_weight_g" name="product_weight_g" min="50" max="15000" step="50" value="850" class="range-input">
+                    </div>
+
+                    <div class="slider-group">
+                        <div class="slider-header">
+                            <label class="form-label">
+                                <span>Product Volume</span>
+                            </label>
+                            <span id="volumeVal" class="slider-badge">4,200 cm³</span>
+                        </div>
+                        <input type="range" id="product_volume_cm3" name="product_volume_cm3" min="100" max="50000" step="100" value="4200" class="range-input">
+                    </div>
+
+                    <div class="slider-group">
+                        <div class="slider-header">
+                            <label class="form-label">
+                                <span>Est. Delivery Window</span>
+                                <div class="tooltip-container">
+                                    <i data-lucide="info" class="info-icon"></i>
+                                    <span class="tooltip-text">The number of days allocated in the SLA estimate. Tight windows raise delay risk.</span>
+                                </div>
+                            </label>
+                            <span id="deliveryVal" class="slider-badge">12 Days</span>
+                        </div>
+                        <input type="range" id="estimated_delivery_time_days" name="estimated_delivery_time_days" min="2" max="45" step="0.5" value="12" class="range-input">
+                    </div>
+
+                    <!-- Section D: Temporal Context -->
+                    <div class="form-section-title">
+                        <i data-lucide="calendar"></i>
+                        <span>Temporal Context</span>
+                    </div>
+
+                    <div class="date-meta-grid">
+                        <div class="date-meta-item">
+                            <label for="purchase_month">Month</label>
+                            <select id="purchase_month" name="purchase_month"></select>
+                        </div>
+                        <div class="date-meta-item">
+                            <label for="purchase_day_of_week">Weekday</label>
+                            <select id="purchase_day_of_week" name="purchase_day_of_week"></select>
+                        </div>
+                        <div class="date-meta-item">
+                            <label for="purchase_hour">Hour</label>
+                            <select id="purchase_hour" name="purchase_hour"></select>
+                        </div>
+                    </div>
+
+                    <button type="submit" id="submitBtn" class="submit-btn">
+                        <i data-lucide="sparkles" style="width:1.1rem; height:1.1rem"></i>
+                        <span>Run ONNX Predictor</span>
+                    </button>
+                </form>
+            </div>
+        </section>
+
+        <!-- Right Side: Analytics & Gauge Outcomes -->
+        <section class="main-column">
+            
+            <!-- Dynamic Result Card -->
+            <div class="dashboard-card result-container">
+                <div class="result-card-inner">
+                    <div class="result-card-header">
+                        <span>Risk Assessment Profile</span>
+                        <span id="badge" class="badge-onnx">ONNX CORE</span>
+                    </div>
+
+                    <!-- Empty State -->
+                    <div id="emptyState" class="state-panel">
+                        <div class="empty-compass">
+                            <i data-lucide="compass" class="compass-icon"></i>
+                        </div>
+                        <h3>Ready for Telemetry</h3>
+                        <p>Adjust parameters or load scenarios to initiate prediction mapping.</p>
+                    </div>
+
+                    <!-- Loading State -->
+                    <div id="loadingState" class="state-panel hidden">
+                        <div class="state-loader">
+                            <div class="loader-ring"></div>
+                            <div class="loader-ring-inner"></div>
+                        </div>
+                        <p style="font-weight: 600; color: var(--text-secondary);">Invoking XGBoost Model Pipeline...</p>
+                    </div>
+
+                    <!-- Result Panel with Gauge dial -->
+                    <div id="resultState" class="state-panel hidden" style="width: 100%;">
+                        
+                        <!-- Speedometer Gauge -->
+                        <div class="gauge-wrapper">
+                            <svg class="gauge-svg" viewBox="0 0 100 50">
+                                <!-- Background track -->
+                                <path class="gauge-track" d="M 10 50 A 40 40 0 0 1 90 50" fill="none" stroke-width="8"></path>
+                                <!-- Colored dynamic filler arc -->
+                                <path id="gaugeFill" class="gauge-fill" d="M 10 50 A 40 40 0 0 1 90 50" fill="none" stroke-width="8" stroke-dasharray="125.6" stroke-dashoffset="125.6"></path>
+                            </svg>
+                            <div class="gauge-center-text">
+                                <span id="gaugeProbText">0%</span>
+                                <p>Probability</p>
+                            </div>
+                        </div>
+
+                        <h3 id="outcomeLabel" class="outcome-title"></h3>
+                        <p id="outcomeDesc" class="outcome-desc"></p>
+
+                        <!-- Risk Factors Panel (Explainable AI) -->
+                        <div class="explainable-ai-card">
+                            <h4 class="explain-title">
+                                <i data-lucide="cpu" style="width:0.8rem; height:0.8rem"></i>
+                                Model Factor Impact
+                            </h4>
+                            <div class="factors-list" id="factorsList"></div>
+                        </div>
+                    </div>
+
+                    <!-- Meta Details -->
+                    <div id="resultMeta" class="result-meta-row hidden">
+                        <div class="meta-col">
+                            <span>Route Profile</span>
+                            <p id="metaRoute">-</p>
+                        </div>
+                        <div class="meta-col">
+                            <span>Volumetric Index</span>
+                            <p id="metaWeight">-</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Historical Trends SVG Chart -->
+            <div class="dashboard-card chart-card">
+                <div class="chart-header">
+                    <h3>
+                        <i data-lucide="bar-chart-2" style="width:1rem; height:1rem; color:var(--primary)"></i>
+                        Avg. Delay Rates (Historical)
+                    </h3>
+                    <span>Real-Time Data</span>
+                </div>
+                
+                <div class="svg-chart-wrapper">
+                    <div class="svg-chart-grid-line bottom"></div>
+                    <div class="svg-chart-grid-line middle"></div>
+                    
+                    <div class="chart-column">
+                        <div class="chart-bar-pillar" style="height: 35px;">
+                            <div class="chart-bar-tooltip">8.5%</div>
+                        </div>
+                        <span class="chart-label-text">Jan</span>
+                    </div>
+                    <div class="chart-column">
+                        <div class="chart-bar-pillar" style="height: 42px;">
+                            <div class="chart-bar-tooltip">9.2%</div>
+                        </div>
+                        <span class="chart-label-text">Feb</span>
+                    </div>
+                    <div class="chart-column">
+                        <div class="chart-bar-pillar" style="height: 65px;">
+                            <div class="chart-bar-tooltip">12.4%</div>
+                        </div>
+                        <span class="chart-label-text">Mar</span>
+                    </div>
+                    <div class="chart-column">
+                        <div class="chart-bar-pillar" style="height: 31px;">
+                            <div class="chart-bar-tooltip">7.1%</div>
+                        </div>
+                        <span class="chart-label-text">Apr</span>
+                    </div>
+                    <div class="chart-column">
+                        <div class="chart-bar-pillar" style="height: 85px;">
+                            <div class="chart-bar-tooltip">14.8%</div>
+                        </div>
+                        <span class="chart-label-text">May</span>
+                    </div>
+                    <div class="chart-column">
+                        <div class="chart-bar-pillar" style="height: 25px;">
+                            <div class="chart-bar-tooltip">6.2%</div>
+                        </div>
+                        <span class="chart-label-text">Jun</span>
+                    </div>
+                    <div class="chart-column">
+                        <div class="chart-bar-pillar" style="height: 48px;">
+                            <div class="chart-bar-tooltip">9.8%</div>
+                        </div>
+                        <span class="chart-label-text">Jul</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- History Logs -->
+            <div id="historyCard" class="dashboard-card history-card hidden">
+                <div class="history-card-header">
+                    <i data-lucide="history" style="width:1rem; height:1rem; color:var(--primary)"></i>
+                    <h3>Local Run Log</h3>
+                </div>
+                <div id="historyList" class="history-list"></div>
+            </div>
+
+        </section>
+    </main>
+
+    <!-- Footer -->
+    <footer>
+        <div class="footer-container">
+            <p>© 2026 E-Commerce Delivery Latency MLOps. All rights reserved.</p>
+            <div class="footer-links">
+                <a href="#">Documentation</a>
+                <a href="#">ONNX Runtime</a>
+                <a href="#">GitHub</a>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Core App Script logic -->
+    <script src="./app.js"></script>
+</body>
+</html>
