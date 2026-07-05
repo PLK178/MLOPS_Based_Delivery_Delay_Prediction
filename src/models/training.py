@@ -147,7 +147,7 @@ def tune_hyperparameters(model_name, static_params, param_grid, X, y, cv_params,
     print(f"🎯 Best combination for {model_name}: {best_params} (Mean CV F1: {best_score:.6f})")
     return best_params
 
-def train_model(model_name, static_params, param_grid, X, y, cv_params, categorical_features, experiment_name):
+def train_model(model_name, static_params, param_grid, X, y, cv_params, categorical_features):
     """Tune and then train a single classification model using cross-validation and log results."""
     print(f"\n==================================================")
     print(f"🚀 Training {model_name.upper()} (classification)")
@@ -263,29 +263,25 @@ def train_model(model_name, static_params, param_grid, X, y, cv_params, categori
     
     # MLflow tracking
     try:
-        # Initialize DagsHub MLflow tracking
-        dagshub.init(repo_owner='PLK178', repo_name='MLOPS', mlflow=True)
-        mlflow.set_experiment(experiment_name)
-        with mlflow.start_run(run_name=f"{model_name}_classification"):
-            # Log hyperparameters config
-            mlflow.log_params(final_params)
-            mlflow.log_param("task_type", "classification")
-            mlflow.log_param("n_splits", n_splits)
-            mlflow.log_param("tuned_threshold", best_thresh)
+        if mlflow.active_run() is not None:
+            # Log directly to the active parent run, prefixing with model_name to prevent key collisions
+            prefixed_params = {f"{model_name}_{k}": v for k, v in final_params.items()}
+            mlflow.log_params(prefixed_params)
+            mlflow.log_param(f"{model_name}_tuned_threshold", best_thresh)
             
             # Log overall metrics at tuned threshold
             for key, val in tuned_metrics.items():
                 if not np.isnan(val):
-                    mlflow.log_metric(f"oof_{key}", val)
+                    mlflow.log_metric(f"{model_name}_{key}", val)
             
             # Log default F1 as a comparison reference
-            mlflow.log_metric("oof_default_f1", default_metrics["f1"])
+            mlflow.log_metric(f"{model_name}_default_f1", default_metrics["f1"])
             
             # Log fold models as artifacts
             for fold, model_path in enumerate(models):
-                mlflow.log_artifact(model_path, artifact_path="models")
+                mlflow.log_artifact(model_path, artifact_path=f"models/{model_name}")
                 
-            print(f"✅ Logged to MLflow successfully under run name: {model_name}_classification")
+            print(f"✅ Logged {model_name} metrics & parameters directly to parent run.")
     except Exception as e:
         print(f"⚠️ MLflow logging failed: {e}")
         
@@ -341,26 +337,51 @@ def main():
     cv_params = config["cv"]
     configured_models = config["models"]
     
+    # Initialize DagsHub MLflow tracking once for the run
+    mlflow_enabled = False
+    try:
+        dagshub.init(repo_owner='PLK178', repo_name='MLOPS', mlflow=True)
+        mlflow.set_experiment("Olist_Delivery_Prediction")
+        mlflow_enabled = True
+    except Exception as e:
+        print(f"⚠️ MLflow initialization failed: {e}")
+        
     import datetime
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    experiment_name = f"Olist_Delivery_Prediction_{timestamp}"
-    print(f"🧪 Creating MLflow experiment: {experiment_name}")
+    parent_run_name = f"Training_Run_{timestamp}"
     
     summary = {}
-    for model_name, model_config in configured_models.items():
-        static_params = model_config.get("static_params", {})
-        param_grid = model_config.get("param_grid", {})
-        metrics = train_model(
-            model_name=model_name,
-            static_params=static_params,
-            param_grid=param_grid,
-            X=X,
-            y=y,
-            cv_params=cv_params,
-            categorical_features=categorical_features,
-            experiment_name=experiment_name
-        )
-        summary[model_name] = metrics
+    
+    if mlflow_enabled:
+        print(f"🧪 Starting MLflow Parent Run: {parent_run_name} under experiment: Olist_Delivery_Prediction")
+        with mlflow.start_run(run_name=parent_run_name) as parent_run:
+            for model_name, model_config in configured_models.items():
+                static_params = model_config.get("static_params", {})
+                param_grid = model_config.get("param_grid", {})
+                metrics = train_model(
+                    model_name=model_name,
+                    static_params=static_params,
+                    param_grid=param_grid,
+                    X=X,
+                    y=y,
+                    cv_params=cv_params,
+                    categorical_features=categorical_features
+                )
+                summary[model_name] = metrics
+    else:
+        for model_name, model_config in configured_models.items():
+            static_params = model_config.get("static_params", {})
+            param_grid = model_config.get("param_grid", {})
+            metrics = train_model(
+                model_name=model_name,
+                static_params=static_params,
+                param_grid=param_grid,
+                X=X,
+                y=y,
+                cv_params=cv_params,
+                categorical_features=categorical_features
+            )
+            summary[model_name] = metrics
         
     print("\n" + "="*50)
     print("🏁 TRAINING COMPLETE SUMMARY (Tuned Thresholds)")
