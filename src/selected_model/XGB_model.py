@@ -16,6 +16,20 @@ from src.Model_evaluation.evaluation import (
     calculate_classification_metrics,
     save_plots
 )
+import onnx
+import onnxruntime as rt
+from skl2onnx import convert_sklearn, update_registered_converter
+from skl2onnx.common.data_types import FloatTensorType, StringTensorType, Int64TensorType
+from onnxmltools.convert.xgboost.operator_converters.XGBoost import convert_xgboost
+from skl2onnx.common.shape_calculator import calculate_linear_classifier_output_shapes
+from xgboost import XGBClassifier
+
+# Register XGBoost Classifier converter with skl2onnx
+update_registered_converter(
+    XGBClassifier, 'XGBClassifier',
+    calculate_linear_classifier_output_shapes, convert_xgboost,
+    options={'nocl': [True, False], 'zipmap': [True, False, 'columns']}
+)
 
 # Constants
 PROJECT_ROOT = "/home/likith/mlops/MLOPS"
@@ -35,7 +49,6 @@ def get_preprocessing_pipeline(numerical_cols, categorical_cols):
     ])
     
     cat_transformer = Pipeline(steps=[
-        ('imputer', SimpleImputer(strategy='constant', fill_value='missing')),
         ('encoder', OneHotEncoder(handle_unknown='ignore', sparse_output=False))
     ])
     
@@ -126,6 +139,33 @@ def main():
     joblib.dump(pipeline, model_save_path)
     print(f"💾 Saved best model pipeline to: {model_save_path}")
     
+    # 7.5 Convert to ONNX and Save
+    print("🔄 Converting pipeline to ONNX format...")
+    initial_types = [
+        ('price', FloatTensorType([None, 1])),
+        ('freight_value', FloatTensorType([None, 1])),
+        ('product_category_name', StringTensorType([None, 1])),
+        ('product_weight_g', FloatTensorType([None, 1])),
+        ('product_volume_cm3', FloatTensorType([None, 1])),
+        ('is_same_state', Int64TensorType([None, 1])),
+        ('purchase_month', Int64TensorType([None, 1])),
+        ('purchase_day_of_week', Int64TensorType([None, 1])),
+        ('purchase_hour', Int64TensorType([None, 1])),
+        ('estimated_delivery_time_days', FloatTensorType([None, 1])),
+        ('freight_to_price_ratio', FloatTensorType([None, 1])),
+    ]
+    options = {XGBClassifier: {'zipmap': False}}
+    model_onnx = convert_sklearn(
+        pipeline,
+        initial_types=initial_types,
+        target_opset={'': 15, 'ai.onnx.ml': 3},
+        options=options
+    )
+    onnx_save_path = os.path.join(MODELS_DIR, "best_xgb_model_pipeline.onnx")
+    with open(onnx_save_path, "wb") as f:
+        f.write(model_onnx.SerializeToString())
+    print(f"💾 Saved ONNX model pipeline to: {onnx_save_path}")
+    
     # 8. Evaluate on Test Set
     test_probs = pipeline.predict_proba(X_test)[:, 1]
     
@@ -193,6 +233,7 @@ def main():
             
             # Log artifacts (plots and model file)
             mlflow.log_artifact(model_save_path, artifact_path="models")
+            mlflow.log_artifact(onnx_save_path, artifact_path="models")
             if os.path.exists(PLOTS_DIR):
                 mlflow.log_artifacts(PLOTS_DIR, artifact_path="plots")
             
