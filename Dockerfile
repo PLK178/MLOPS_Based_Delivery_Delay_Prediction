@@ -11,7 +11,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Install python dependencies in builder stage
 COPY requirements.txt .
 # Add fastapi and uvicorn in case they are not in requirements.txt
-RUN pip install --no-cache-dir --user fastapi uvicorn pydantic joblib pandas scikit-learn xgboost
+RUN pip install --no-cache-dir --user -r requirements.txt fastapi uvicorn
 
 # --- Final Production Image ---
 FROM python:3.11-slim
@@ -23,9 +23,10 @@ COPY --from=builder /root/.local /root/.local
 ENV PATH=/root/.local/bin:$PATH
 
 # Copy backend server entrypoint, source pipeline files, and models
-COPY main.py .
+COPY APP/main.py ./main.py
 COPY src/ ./src/
-COPY models/best_xgb_model_pipeline.joblib ./models/
+COPY models/best_xgb_model_pipeline.onnx ./models/
+COPY templates/ ./templates/
 
 EXPOSE 8000
 
