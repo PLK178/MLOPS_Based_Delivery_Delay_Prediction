@@ -54,6 +54,7 @@ models/*.pt
 models/*.pth
 models/*.onnx
 models/*.h5
+!models/best_xgb_model_pipeline.onnx
 
 # Editors and IDEs
 .vscode/
