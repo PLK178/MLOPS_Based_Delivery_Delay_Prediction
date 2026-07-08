@@ -1,6 +1,4 @@
 import os
-import joblib
-import pandas as pd
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,19 +15,22 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Load the trained XGBoost model pipeline
-MODEL_PATH = "models/best_xgb_model_pipeline.joblib"
-model = None
+import numpy as np
+import onnxruntime as rt
+
+# Load the trained ONNX model
+MODEL_PATH = "models/best_xgb_model_pipeline.onnx"
+session = None
 
 try:
     if os.path.exists(MODEL_PATH):
-        print(f"🔄 Loading model pipeline from {MODEL_PATH}...")
-        model = joblib.load(MODEL_PATH)
-        print("✅ Model pipeline loaded successfully.")
+        print(f"🔄 Loading ONNX model from {MODEL_PATH}...")
+        session = rt.InferenceSession(MODEL_PATH, providers=["CPUExecutionProvider"])
+        print("✅ ONNX model loaded successfully.")
     else:
-        print(f"⚠️ Warning: Model pipeline not found at {MODEL_PATH}.")
+        print(f"⚠️ Warning: ONNX model not found at {MODEL_PATH}.")
 except Exception as e:
-    print(f"❌ Error loading model: {str(e)}")
+    print(f"❌ Error loading ONNX model: {str(e)}")
 
 # Request schema matching the feature columns
 class InferencePayload(BaseModel):
@@ -46,37 +47,35 @@ class InferencePayload(BaseModel):
 
 @app.post("/predict")
 def predict(payload: InferencePayload):
-    if model is None:
+    if session is None:
         raise HTTPException(
             status_code=503, 
-            detail="Model is not loaded on the server. Please check server logs."
+            detail="ONNX model is not loaded on the server. Please check server logs."
         )
     
     try:
         # Calculate freight_to_price_ratio (avoiding division by zero)
         freight_ratio = payload.freight_value / payload.price if payload.price > 0 else 0.0
 
-        # Convert request to pandas DataFrame (pipeline expects column names to match exactly)
-        input_data = pd.DataFrame([{
-            "price": payload.price,
-            "freight_value": payload.freight_value,
-            "product_category_name": payload.product_category_name,
-            "product_weight_g": payload.product_weight_g,
-            "product_volume_cm3": payload.product_volume_cm3,
-            "is_same_state": payload.is_same_state,
-            "purchase_month": payload.purchase_month,
-            "purchase_day_of_week": payload.purchase_day_of_week,
-            "purchase_hour": payload.purchase_hour,
-            "estimated_delivery_time_days": payload.estimated_delivery_time_days,
-            "freight_to_price_ratio": freight_ratio
-        }])
+        # Prepare inputs matching ONNX expected types & shapes
+        input_data = {
+            'price': np.array([[payload.price]], dtype=np.float32),
+            'freight_value': np.array([[payload.freight_value]], dtype=np.float32),
+            'product_category_name': np.array([[payload.product_category_name]], dtype=object),
+            'product_weight_g': np.array([[payload.product_weight_g]], dtype=np.float32),
+            'product_volume_cm3': np.array([[payload.product_volume_cm3]], dtype=np.float32),
+            'is_same_state': np.array([[payload.is_same_state]], dtype=np.int64),
+            'purchase_month': np.array([[payload.purchase_month]], dtype=np.int64),
+            'purchase_day_of_week': np.array([[payload.purchase_day_of_week]], dtype=np.int64),
+            'purchase_hour': np.array([[payload.purchase_hour]], dtype=np.int64),
+            'estimated_delivery_time_days': np.array([[payload.estimated_delivery_time_days]], dtype=np.float32),
+            'freight_to_price_ratio': np.array([[freight_ratio]], dtype=np.float32),
+        }
         
-        # Make predictions
-        prediction = int(model.predict(input_data)[0])
-        probabilities = model.predict_proba(input_data)[0]
-        
-        # Get probability score for the delay class (index 1)
-        probability = float(probabilities[1])
+        # Make predictions using ONNX Runtime
+        raw_preds = session.run(None, input_data)
+        prediction = int(raw_preds[0][0])
+        probability = float(raw_preds[1][0][1])
         
         return {
             "prediction": prediction,
