@@ -158,9 +158,9 @@ def main():
     for k, v in tuned_metrics.items():
         print(f"  - {k.upper()}: {v:.6f}")
         
-    # Save evaluation plots
-    save_plots(y_test, tuned_preds, test_probs, task_type="classification", output_dir=PLOTS_DIR)
-    print(f"📈 Saved evaluation plots to: {PLOTS_DIR}")
+    # Save evaluation plots (Disabled for lightweight deployment)
+    # save_plots(y_test, tuned_preds, test_probs, task_type="classification", output_dir=PLOTS_DIR)
+    # print(f"📈 Saved evaluation plots to: {PLOTS_DIR}")
 
     # 9. MLflow Tracking and Model Registry
     try:
