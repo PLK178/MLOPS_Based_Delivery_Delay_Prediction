@@ -14,3 +14,7 @@ catboost
 lightgbm
 PyYAML
 imbalanced-learn
+onnx
+onnxruntime
+skl2onnx
+onnxmltools
