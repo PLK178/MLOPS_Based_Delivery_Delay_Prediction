@@ -27,7 +27,7 @@ services:
       dockerfile: Dockerfile
     container_name: mlops_frontend
     ports:
-      - "80:80"
+      - "8005:80"
     depends_on:
       - backend
     restart: unless-stopped
