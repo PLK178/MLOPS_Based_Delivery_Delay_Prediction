@@ -37,6 +37,8 @@ def run_etl():
             # --- TRANSFORM ---
             # SQLite stores dates as strings. PostgreSQL strictly expects timestamp objects.
             # We automatically find and convert any date/timestamp columns.
+            # Note: We preserve all original datetime columns to enable both regression targets
+            # (e.g. delivery_time_days) and classification targets (is_delayed) in downstream feature engineering.
             date_cols = [col for col in df.columns if 'date' in col or 'timestamp' in col or 'approved_at' in col]
             for col in date_cols:
                 df[col] = pd.to_datetime(df[col], errors='coerce')
