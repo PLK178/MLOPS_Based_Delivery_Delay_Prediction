@@ -74,12 +74,10 @@ def predict(payload: InferencePayload):
         
         # Make predictions using ONNX Runtime
         raw_preds = session.run(None, input_data)
-        prediction = int(raw_preds[0][0])
-        probability = float(raw_preds[1][0][1])
+        predicted_days = float(raw_preds[0][0][0])
         
         return {
-            "prediction": prediction,
-            "probability": probability
+            "predicted_days": predicted_days
         }
         
     except Exception as e:
