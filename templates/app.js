@@ -98,6 +98,7 @@ const loadPreset = (type) => {
 
 // Local storage registry for runs history log
 let runHistory = [];
+
 const loadHistoryLog = () => {
     const saved = localStorage.getItem('vanilla_runs_history');
     if (saved) {
@@ -134,17 +135,17 @@ const renderHistoryLog = () => {
         const itemHtml = `
             <div class="history-item">
                 <div class="history-item-left">
-                    <div class="history-dot ${item.prediction === 1 ? 'delayed' : 'ontime'}"></div>
+                    <div class="history-dot ${item.is_delayed ? 'delayed' : 'ontime'}"></div>
                     <div>
                         <p class="history-item-title">${formattedCat}</p>
                         <p class="history-item-sub">$${parseFloat(item.price).toFixed(2)} + $${parseFloat(item.freight).toFixed(2)} freight</p>
                     </div>
                 </div>
                 <div class="history-item-right">
-                    <p class="history-item-status ${item.prediction === 1 ? 'delayed' : 'ontime'}">
-                        ${item.prediction === 1 ? 'Delayed' : 'On-Time'}
+                    <p class="history-item-status ${item.is_delayed ? 'delayed' : 'ontime'}">
+                        ${item.predicted_days.toFixed(1)} Days
                     </p>
-                    <p class="history-item-conf">${(item.probability * 100).toFixed(0)}% conf.</p>
+                    <p class="history-item-conf">SLA: ${item.estimated_days.toFixed(0)}d</p>
                 </div>
             </div>
         `;
@@ -152,31 +153,55 @@ const renderHistoryLog = () => {
     });
 };
 
+const formatDaysToReadable = (daysVal, short = false) => {
+    if (daysVal <= 0) {
+        return short ? "0h" : "0 hours";
+    }
+    const days = Math.floor(daysVal);
+    const fractionalDays = daysVal - days;
+    const hours = Math.round(fractionalDays * 24);
+    
+    let result = [];
+    if (days > 0) {
+        result.push(short ? `${days}d` : `${days} day${days === 1 ? '' : 's'}`);
+    }
+    if (hours > 0) {
+        result.push(short ? `${hours}h` : `${hours} hour${hours === 1 ? '' : 's'}`);
+    }
+    
+    return result.length > 0 ? result.join(' ') : (short ? "0h" : "0 hours");
+};
+
 // Gauge SVG arc offset visual updates
-const updateGaugeOffset = (prob) => {
+const updateGaugeOffset = (predictedDays, estimatedDays) => {
     const gaugeFill = document.getElementById('gaugeFill');
     const gaugeText = document.getElementById('gaugeProbText');
+    const gaugeSubtext = document.querySelector('.gauge-center-text p');
+    
+    const delay = Math.max(0, predictedDays - estimatedDays);
+    
+    // We scale the gauge to a max of 30 days or estimatedDays * 1.5, whichever is higher
+    const maxDays = Math.max(30, estimatedDays * 1.5);
+    const fraction = Math.min(predictedDays / maxDays, 1.0);
     
     // Half circle SVG stroke dash length is ~125.6
     const strokeDash = 125.6;
-    const offset = strokeDash - (strokeDash * prob);
+    const offset = strokeDash - (strokeDash * fraction);
     
     // Animate fill
     gaugeFill.style.strokeDashoffset = offset;
-    gaugeText.textContent = (prob * 100).toFixed(0) + "%";
-
-    // Dynamic color gradient shifting
-    if (prob < 0.35) {
-        gaugeFill.className.baseVal = "gauge-fill ontime";
-    } else if (prob < 0.65) {
-        gaugeFill.className.baseVal = "gauge-fill warning";
+    
+    if (delay > 0) {
+        gaugeText.textContent = `+${formatDaysToReadable(delay, true)}`;
+        gaugeSubtext.textContent = "Delay Time";
     } else {
-        gaugeFill.className.baseVal = "gauge-fill critical";
+        gaugeText.textContent = "0 Days";
+        gaugeSubtext.textContent = "Delay Time";
     }
-};
+}
 
 // Generate Model Factor Importance list (Explainable AI simulator)
-const renderExplainableFactors = (payload, prob, isDelayed) => {
+const renderExplainableFactors = (payload, predictedDays, isDelayed) => {
     const list = document.getElementById('factorsList');
     list.innerHTML = '';
 
@@ -184,22 +209,22 @@ const renderExplainableFactors = (payload, prob, isDelayed) => {
     const factors = [
         {
             name: "SLA Window Length",
-            impact: payload.estimated_delivery_time_days < 8 ? 0.35 : -0.15,
+            impact: payload.estimated_delivery_time_days < 8 ? 2.5 : -1.2,
             desc: payload.estimated_delivery_time_days < 8 ? "Tighter delivery timeframe creates severe logistics pressure" : "Generous SLA window reduces late delivery probability"
         },
         {
             name: "Geospatial Boundary",
-            impact: payload.is_same_state === 0 ? 0.18 : -0.12,
+            impact: payload.is_same_state === 0 ? 3.8 : -2.1,
             desc: payload.is_same_state === 0 ? "Interstate crossing adds transfer hubs & carrier switches" : "Intra-state routing bypasses national sorting hubs"
         },
         {
             name: "Volumetric Cargo Index",
-            impact: (payload.product_weight_g * payload.product_volume_cm3) / 1000000 > 15 ? 0.22 : -0.05,
+            impact: (payload.product_weight_g * payload.product_volume_cm3) / 1000000 > 15 ? 1.5 : -0.5,
             desc: (payload.product_weight_g * payload.product_volume_cm3) / 1000000 > 15 ? "Heavy/bulky items limit carrier dispatch options" : "Standard size cargo matches normal courier streams"
         },
         {
             name: "Financial Premium",
-            impact: payload.price > 300 ? 0.1 : -0.05,
+            impact: payload.price > 300 ? 0.8 : -0.4,
             desc: payload.price > 300 ? "High value items require additional secure handling processes" : "Standard item pricing facilitates rapid processing"
         }
     ];
@@ -208,7 +233,7 @@ const renderExplainableFactors = (payload, prob, isDelayed) => {
     factors.sort((a, b) => Math.abs(b.impact) - Math.abs(a.impact));
 
     factors.forEach(f => {
-        const percent = Math.min(Math.abs(f.impact) * 200, 100); // Scale factor for presentation
+        const percent = Math.min(Math.abs(f.impact) * 20, 100); // Scale factor for presentation
         const isPos = f.impact > 0;
         
         const itemHtml = `
@@ -218,11 +243,11 @@ const renderExplainableFactors = (payload, prob, isDelayed) => {
                     <div class="factor-bar-bg">
                         <div class="factor-bar-fill ${isPos ? 'pos' : 'neg'}" style="width: ${percent}%"></div>
                     </div>
-                    <span class="factor-value ${isPos ? 'pos' : 'neg'}">${isPos ? '+' : ''}${Math.round(f.impact * 100)}%</span>
+                    <span class="factor-value ${isPos ? 'pos' : 'neg'}">${isPos ? '+' : ''}${f.impact.toFixed(1)}d</span>
                 </div>
                 <!-- Dynamic XAI Tooltip -->
                 <span class="tooltip-text" style="width: 250px; bottom: 130%; font-size: 0.65rem;">
-                    ${f.desc} (${isPos ? 'Increases' : 'Decreases'} risk by ${Math.abs(Math.round(f.impact * 100))}%)
+                    ${f.desc} (${isPos ? 'Adds' : 'Subtracts'} ~${Math.abs(f.impact.toFixed(1))} days)
                 </span>
             </div>
         `;
@@ -267,7 +292,7 @@ form.addEventListener('submit', async (e) => {
 
     let resultData;
     try {
-        const response = await fetch('https://mlops-based-delivery-delay-prediction.onrender.com/predict', {
+        const response = await fetch('/predict', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
@@ -277,31 +302,27 @@ form.addEventListener('submit', async (e) => {
     } catch (err) {
         console.warn("Backend FastAPI offline. Using sandbox fallback logic...");
         // Fallback simulation logic matching ML profiles
-        const risk = (
-            (payload.freight_value > 30 ? 0.30 : 0.05) +
-            (payload.estimated_delivery_time_days < 7 ? 0.45 : 0.05) +
-            (payload.product_weight_g > 5000 ? 0.22 : 0.0) +
-            (payload.is_same_state === 0 ? 0.18 : 0.0)
-        );
+        const baseDays = 8.5 + (payload.freight_value > 30 ? 4.0 : 0) + (payload.is_same_state === 0 ? 8.0 : 0) + (payload.product_weight_g > 5000 ? 3.0 : 0);
         resultData = {
-            prediction: risk > 0.45 ? 1 : 0,
-            probability: Math.min(Math.max(risk, 0.05), 0.95)
+            predicted_days: baseDays
         };
     }
 
     // Delay result render briefly for loading animation feel
     setTimeout(() => {
         loadingState.classList.add('hidden');
-        resultState.classList.remove('hidden');
-        resultMeta.classList.remove('hidden');
+        resultState.className = "state-panel";
+        resultMeta.className = "result-meta-row";
         
         // Reset submit button state
         submitBtn.disabled = false;
-        submitBtn.innerHTML = `<i data-lucide="sparkles" style="width:1.1rem; height:1.1rem"></i><span>Run ONNX Predictor</span>`;
+        submitBtn.innerHTML = `<i data-lucide="sparkles" style="width:1.1rem; height:1.1rem"></i><span>Run Predictor</span>`;
         lucide.createIcons();
 
-        const isDelayed = resultData.prediction === 1;
-        const confidence = resultData.probability;
+        const predictedDays = resultData.predicted_days;
+        const estimatedDays = payload.estimated_delivery_time_days;
+        const isDelayed = predictedDays > estimatedDays;
+        const delayDays = Math.max(0, predictedDays - estimatedDays);
 
         // Render outcomes
         const titleEl = document.getElementById('outcomeLabel');
@@ -309,20 +330,20 @@ form.addEventListener('submit', async (e) => {
 
         if (isDelayed) {
             badge.className = "badge-onnx delayed";
-            badge.textContent = "High Risk";
+            badge.textContent = "Delayed";
             titleEl.className = "outcome-title delayed";
-            titleEl.textContent = "High Delay Risk";
-            descEl.textContent = "This transit profile exceeds safe limits for standard operational SLA guarantees.";
+            titleEl.textContent = `Predicted: ${formatDaysToReadable(predictedDays)}`;
+            descEl.textContent = `The package you ordered will be delivered in ${formatDaysToReadable(predictedDays)}, and the model predicts a delivery delay of ${formatDaysToReadable(delayDays)}.`;
         } else {
             badge.className = "badge-onnx ontime";
-            badge.textContent = "Safe Profile";
+            badge.textContent = "On-Time";
             titleEl.className = "outcome-title ontime";
-            titleEl.textContent = "Likely On-Time";
-            descEl.textContent = "Standard route features are optimized. The shipment is projected to land within SLA.";
+            titleEl.textContent = `Predicted: ${formatDaysToReadable(predictedDays)}`;
+            descEl.textContent = `The package you ordered will be delivered in ${formatDaysToReadable(predictedDays)}, and the model predicts a delivery delay of 0 hours (on time).`;
         }
 
-        updateGaugeOffset(confidence);
-        renderExplainableFactors(payload, confidence, isDelayed);
+        updateGaugeOffset(predictedDays, estimatedDays);
+        renderExplainableFactors(payload, predictedDays, isDelayed);
 
         // Metadata rendering
         document.getElementById('metaRoute').textContent = payload.is_same_state === 1 ? "Simple Domestic" : "Interstate Transit";
@@ -334,8 +355,9 @@ form.addEventListener('submit', async (e) => {
             category: payload.product_category_name,
             price: payload.price,
             freight: payload.freight_value,
-            prediction: resultData.prediction,
-            probability: confidence
+            predicted_days: predictedDays,
+            estimated_days: estimatedDays,
+            is_delayed: isDelayed
         });
 
     }, 850);
