@@ -4,21 +4,21 @@ import joblib
 import numpy as np
 import pandas as pd
 
-from sklearn.model_selection import StratifiedKFold
+from sklearn.model_selection import StratifiedKFold, KFold
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.impute import SimpleImputer
-from sklearn.metrics import f1_score
+from sklearn.metrics import f1_score, mean_squared_error
 
-# Import all classification models at the beginning
-from sklearn.linear_model import LogisticRegression
-from sklearn.tree import DecisionTreeClassifier
+# Import all classification and regression models
+from sklearn.linear_model import LogisticRegression, Ridge
+from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 from sklearn.ensemble import (
-    RandomForestClassifier,
-    ExtraTreesClassifier,
-    AdaBoostClassifier,
-    GradientBoostingClassifier
+    RandomForestClassifier, RandomForestRegressor,
+    ExtraTreesClassifier, ExtraTreesRegressor,
+    AdaBoostClassifier, AdaBoostRegressor,
+    GradientBoostingClassifier, GradientBoostingRegressor
 )
 import xgboost as xgb
 import catboost as cb
@@ -27,7 +27,8 @@ import mlflow
 import dagshub
 
 from src.Model_evaluation.evaluation import (
-    calculate_classification_metrics
+    calculate_classification_metrics,
+    calculate_regression_metrics
 )
 
 # Constants
@@ -36,7 +37,7 @@ CONFIG_PATH = os.path.join(PROJECT_ROOT, "configs/model_config.yaml")
 MODELS_DIR = os.path.join(PROJECT_ROOT, "models")
 
 # Mapping model names to classification classes
-MODEL_CLASSES = {
+MODEL_CLASSES_CLASSIFICATION = {
     "logistic_regression": LogisticRegression,
     "decision_tree": DecisionTreeClassifier,
     "random_forest": RandomForestClassifier,
@@ -46,6 +47,19 @@ MODEL_CLASSES = {
     "xgboost": xgb.XGBClassifier,
     "catboost": cb.CatBoostClassifier,
     "lightgbm": lgb.LGBMClassifier
+}
+
+# Mapping model names to regression classes
+MODEL_CLASSES_REGRESSION = {
+    "logistic_regression": Ridge,
+    "decision_tree": DecisionTreeRegressor,
+    "random_forest": RandomForestRegressor,
+    "extra_trees": ExtraTreesRegressor,
+    "adaboost": AdaBoostRegressor,
+    "gradient_boosting": GradientBoostingRegressor,
+    "xgboost": xgb.XGBRegressor,
+    "catboost": cb.CatBoostRegressor,
+    "lightgbm": lgb.LGBMRegressor
 }
 
 def load_config(config_path):
@@ -77,7 +91,7 @@ def get_preprocessing_pipeline(numerical_cols, categorical_cols):
     
     return preprocessor
 
-def tune_hyperparameters(model_name, static_params, param_grid, X, y, cv_params, categorical_features):
+def tune_hyperparameters(model_name, static_params, param_grid, X, y, cv_params, categorical_features, task_type="classification"):
     """Perform a grid search over param_grid using a subset CV split for speed."""
     from sklearn.model_selection import ParameterGrid
     grid = list(ParameterGrid(param_grid))
@@ -86,13 +100,21 @@ def tune_hyperparameters(model_name, static_params, param_grid, X, y, cv_params,
         return grid[0] if grid else {}
         
     print(f"🔍 Tuning hyperparameters for {model_name} (evaluating {len(grid)} combinations)...")
-    best_score = -1.0
+    
     best_params = grid[0]
     
     # 3-fold split for faster hyperparameter search
-    cv = StratifiedKFold(n_splits=3, shuffle=True, random_state=42)
+    if task_type == "classification":
+        cv = StratifiedKFold(n_splits=3, shuffle=True, random_state=42)
+        model_classes = MODEL_CLASSES_CLASSIFICATION
+        best_score = -1.0
+    else:
+        cv = KFold(n_splits=3, shuffle=True, random_state=42)
+        model_classes = MODEL_CLASSES_REGRESSION
+        best_score = 1e9
+        
     numerical_cols = [c for c in X.columns if c not in categorical_features]
-    model_class = MODEL_CLASSES[model_name]
+    model_class = model_classes[model_name]
     
     for params_combo in grid:
         scores = []
@@ -110,7 +132,10 @@ def tune_hyperparameters(model_name, static_params, param_grid, X, y, cv_params,
             X_val_trans = preprocessor.transform(X_val)
             
             if model_name == "adaboost":
-                base_model = model_class(**full_params, estimator=DecisionTreeClassifier(max_depth=1, class_weight='balanced'))
+                if task_type == "classification":
+                    base_model = model_class(**full_params, estimator=DecisionTreeClassifier(max_depth=1, class_weight='balanced'))
+                else:
+                    base_model = model_class(**full_params, estimator=DecisionTreeRegressor(max_depth=3))
             else:
                 base_model = model_class(**full_params)
                 
@@ -124,7 +149,7 @@ def tune_hyperparameters(model_name, static_params, param_grid, X, y, cv_params,
                     callbacks = [lgb.early_stopping(stopping_rounds=early_stopping_rounds, verbose=False)]
                     base_model.fit(X_train_trans, y_train, eval_set=[(X_val_trans, y_val)], callbacks=callbacks)
             else:
-                if model_name == "gradient_boosting":
+                if model_name == "gradient_boosting" and task_type == "classification":
                     from sklearn.utils.class_weight import compute_sample_weight
                     sample_weight = compute_sample_weight(class_weight='balanced', y=y_train)
                     base_model.fit(X_train_trans, y_train, sample_weight=sample_weight)
@@ -136,25 +161,37 @@ def tune_hyperparameters(model_name, static_params, param_grid, X, y, cv_params,
                 ('model', base_model)
             ])
             val_preds = pipeline.predict(X_val)
-            score = f1_score(y_val, val_preds, zero_division=0)
-            scores.append(score)
+            if task_type == "classification":
+                score = f1_score(y_val, val_preds, zero_division=0)
+                scores.append(score)
+            else:
+                score = mean_squared_error(y_val, val_preds)
+                scores.append(score)
             
         mean_score = np.mean(scores)
-        if mean_score > best_score:
-            best_score = mean_score
-            best_params = params_combo
-            
-    print(f"🎯 Best combination for {model_name}: {best_params} (Mean CV F1: {best_score:.6f})")
+        if task_type == "classification":
+            if mean_score > best_score:
+                best_score = mean_score
+                best_params = params_combo
+        else:
+            if mean_score < best_score:
+                best_score = mean_score
+                best_params = params_combo
+                
+    if task_type == "classification":
+        print(f"🎯 Best combination for {model_name}: {best_params} (Mean CV F1: {best_score:.6f})")
+    else:
+        print(f"🎯 Best combination for {model_name}: {best_params} (Mean CV MSE: {best_score:.6f})")
     return best_params
 
-def train_model(model_name, static_params, param_grid, X, y, cv_params, categorical_features):
-    """Tune and then train a single classification model using cross-validation and log results."""
+def train_model(model_name, static_params, param_grid, X, y, cv_params, categorical_features, task_type="classification"):
+    """Tune and then train a single model using cross-validation and log results."""
     print(f"\n==================================================")
-    print(f"🚀 Training {model_name.upper()} (classification)")
+    print(f"🚀 Training {model_name.upper()} ({task_type})")
     print(f"==================================================")
     
     # 1. Hyperparameter Tuning
-    best_tuned_params = tune_hyperparameters(model_name, static_params, param_grid, X, y, cv_params, categorical_features)
+    best_tuned_params = tune_hyperparameters(model_name, static_params, param_grid, X, y, cv_params, categorical_features, task_type=task_type)
     
     # 2. Re-combine static and best tuned params for final cross-validated training
     final_params = {**static_params, **best_tuned_params}
@@ -163,18 +200,24 @@ def train_model(model_name, static_params, param_grid, X, y, cv_params, categori
     shuffle = cv_params.get("shuffle", True)
     random_state = cv_params.get("random_state", 42)
     
-    cv = StratifiedKFold(n_splits=n_splits, shuffle=shuffle, random_state=random_state)
-    oof_preds_default = np.zeros(len(X))
-    oof_probs = np.zeros(len(X))
+    if task_type == "classification":
+        cv = StratifiedKFold(n_splits=n_splits, shuffle=shuffle, random_state=random_state)
+        oof_preds_default = np.zeros(len(X))
+        oof_probs = np.zeros(len(X))
+        model_classes = MODEL_CLASSES_CLASSIFICATION
+    else:
+        cv = KFold(n_splits=n_splits, shuffle=shuffle, random_state=random_state)
+        oof_preds = np.zeros(len(X))
+        model_classes = MODEL_CLASSES_REGRESSION
         
     models = []
     
     # Get model class
-    model_class = MODEL_CLASSES[model_name]
+    model_class = model_classes[model_name]
     numerical_cols = [c for c in X.columns if c not in categorical_features]
     
     for fold, (train_idx, val_idx) in enumerate(cv.split(X, y)):
-        print(f"\nFold {fold + 1}/{n_splits}...")
+        print(f"Fold {fold + 1}/{n_splits}...")
         X_train, y_train = X.iloc[train_idx], y.iloc[train_idx]
         X_val, y_val = X.iloc[val_idx], y.iloc[val_idx]
         
@@ -191,8 +234,10 @@ def train_model(model_name, static_params, param_grid, X, y, cv_params, categori
         
         # Instantiate base estimator
         if model_name == "adaboost":
-            # Instantiate AdaBoost with a class-weighted Decision Tree stump
-            base_model = model_class(**model_params, estimator=DecisionTreeClassifier(max_depth=1, class_weight='balanced'))
+            if task_type == "classification":
+                base_model = model_class(**model_params, estimator=DecisionTreeClassifier(max_depth=1, class_weight='balanced'))
+            else:
+                base_model = model_class(**model_params, estimator=DecisionTreeRegressor(max_depth=3))
         else:
             base_model = model_class(**model_params)
         
@@ -207,8 +252,7 @@ def train_model(model_name, static_params, param_grid, X, y, cv_params, categori
                 callbacks = [lgb.early_stopping(stopping_rounds=early_stopping_rounds, verbose=False)]
                 base_model.fit(X_train_trans, y_train, eval_set=[(X_val_trans, y_val)], callbacks=callbacks)
         else:
-            if model_name == "gradient_boosting":
-                # Compute sample weights to balance classes for Gradient Boosting
+            if model_name == "gradient_boosting" and task_type == "classification":
                 from sklearn.utils.class_weight import compute_sample_weight
                 sample_weight = compute_sample_weight(class_weight='balanced', y=y_train)
                 base_model.fit(X_train_trans, y_train, sample_weight=sample_weight)
@@ -223,43 +267,56 @@ def train_model(model_name, static_params, param_grid, X, y, cv_params, categori
         
         # Predict on validation set using the pipeline (automatically handles transformation of raw X_val)
         val_preds = model.predict(X_val)
-        val_probs = model.predict_proba(X_val)[:, 1]
         
-        oof_preds_default[val_idx] = val_preds
-        oof_probs[val_idx] = val_probs
-        
+        if task_type == "classification":
+            val_probs = model.predict_proba(X_val)[:, 1]
+            oof_preds_default[val_idx] = val_preds
+            oof_probs[val_idx] = val_probs
+        else:
+            oof_preds[val_idx] = val_preds
+            
         # Save fold model pipeline
         model_path = os.path.join(MODELS_DIR, f"{model_name}_fold_{fold}.joblib")
         joblib.dump(model, model_path)
         models.append(model_path)
         
-    # --- DECISION THRESHOLD TUNING ON OUT-OF-FOLD PROBABILITIES ---
-    best_thresh = 0.5
-    best_f1 = 0.0
-    thresholds = np.arange(0.01, 1.0, 0.01)
-    
-    for thresh in thresholds:
-        preds = (oof_probs >= thresh).astype(int)
-        f1 = f1_score(y, preds, zero_division=0)
-        if f1 > best_f1:
-            best_f1 = f1
-            best_thresh = thresh
+    if task_type == "classification":
+        # --- DECISION THRESHOLD TUNING ON OUT-OF-FOLD PROBABILITIES ---
+        best_thresh = 0.5
+        best_f1 = 0.0
+        thresholds = np.arange(0.01, 1.0, 0.01)
+        
+        for thresh in thresholds:
+            preds = (oof_probs >= thresh).astype(int)
+            f1 = f1_score(y, preds, zero_division=0)
+            if f1 > best_f1:
+                best_f1 = f1
+                best_thresh = thresh
+                
+        print(f"\n🎯 Best Decision Threshold found: {best_thresh:.2f} (OOF F1-Score: {best_f1:.6f})")
+        
+        # Calculate metrics at default (0.50) and tuned thresholds
+        default_metrics = calculate_classification_metrics(y, oof_preds_default, oof_probs)
+        
+        oof_preds_tuned = (oof_probs >= best_thresh).astype(int)
+        tuned_metrics = calculate_classification_metrics(y, oof_preds_tuned, oof_probs)
             
-    print(f"\n🎯 Best Decision Threshold found: {best_thresh:.2f} (OOF F1-Score: {best_f1:.6f})")
-    
-    # Calculate metrics at default (0.50) and tuned thresholds
-    default_metrics = calculate_classification_metrics(y, oof_preds_default, oof_probs)
-    
-    oof_preds_tuned = (oof_probs >= best_thresh).astype(int)
-    tuned_metrics = calculate_classification_metrics(y, oof_preds_tuned, oof_probs)
-        
-    print(f"✨ Overall OOF Metrics at Default Threshold (0.50):")
-    for k, v in default_metrics.items():
-        print(f"  - {k.upper()}: {v:.6f}")
-        
-    print(f"🎯 Overall OOF Metrics at Tuned Threshold ({best_thresh:.2f}):")
-    for k, v in tuned_metrics.items():
-        print(f"  - {k.upper()}: {v:.6f}")
+        print(f"✨ Overall OOF Metrics at Default Threshold (0.50):")
+        for k, v in default_metrics.items():
+            print(f"  - {k.upper()}: {v:.6f}")
+            
+        print(f"🎯 Overall OOF Metrics at Tuned Threshold ({best_thresh:.2f}):")
+        for k, v in tuned_metrics.items():
+            print(f"  - {k.upper()}: {v:.6f}")
+            
+        metrics_to_log = tuned_metrics
+    else:
+        reg_metrics = calculate_regression_metrics(y, oof_preds)
+        print(f"✨ Overall OOF Regression Metrics:")
+        for k, v in reg_metrics.items():
+            print(f"  - {k.upper()}: {v:.6f}")
+            
+        metrics_to_log = reg_metrics
     
     # MLflow tracking
     try:
@@ -267,15 +324,16 @@ def train_model(model_name, static_params, param_grid, X, y, cv_params, categori
             # Log directly to the active parent run, prefixing with model_name to prevent key collisions
             prefixed_params = {f"{model_name}_{k}": v for k, v in final_params.items()}
             mlflow.log_params(prefixed_params)
-            mlflow.log_param(f"{model_name}_tuned_threshold", best_thresh)
             
-            # Log overall metrics at tuned threshold
-            for key, val in tuned_metrics.items():
+            if task_type == "classification":
+                mlflow.log_param(f"{model_name}_tuned_threshold", best_thresh)
+                # Log default F1 as a comparison reference
+                mlflow.log_metric(f"{model_name}_default_f1", default_metrics["f1"])
+            
+            # Log overall metrics
+            for key, val in metrics_to_log.items():
                 if not np.isnan(val):
                     mlflow.log_metric(f"{model_name}_{key}", val)
-            
-            # Log default F1 as a comparison reference
-            mlflow.log_metric(f"{model_name}_default_f1", default_metrics["f1"])
             
             # Log fold models as artifacts
             for fold, model_path in enumerate(models):
@@ -285,7 +343,7 @@ def train_model(model_name, static_params, param_grid, X, y, cv_params, categori
     except Exception as e:
         print(f"⚠️ MLflow logging failed: {e}")
         
-    return tuned_metrics
+    return metrics_to_log
 
 def main():
     # Make sure output dirs exist
@@ -303,6 +361,7 @@ def main():
     print(f"📊 Dataset Shape: {df.shape}")
     
     target = config["data"]["target"]
+    task_type = config["data"].get("task_type", "classification")
     
     # 3. Clean target and drop rows with null targets
     null_target_count = df[target].isnull().sum()
@@ -311,8 +370,11 @@ def main():
         df = df.dropna(subset=[target])
         
     # Split features and target
-    y = df[target].astype(int)
-    
+    if task_type == "classification":
+        y = df[target].astype(int)
+    else:
+        y = df[target].astype(float)
+        
     # Determine columns to drop
     drop_cols = config["data"].get("drop_columns", [])
     drop_cols = [col for col in drop_cols if col in df.columns]
@@ -322,7 +384,7 @@ def main():
     X = df[features].copy()
     
     print(f"🔑 Features to use: {features}")
-    print(f"🎯 Target: {target} (classification)")
+    print(f"🎯 Target: {target} ({task_type})")
     
     # 4. Handle categorical features
     categorical_features = config["data"].get("categorical_features", [])
@@ -365,7 +427,8 @@ def main():
                     X=X,
                     y=y,
                     cv_params=cv_params,
-                    categorical_features=categorical_features
+                    categorical_features=categorical_features,
+                    task_type=task_type
                 )
                 summary[model_name] = metrics
     else:
@@ -379,17 +442,16 @@ def main():
                 X=X,
                 y=y,
                 cv_params=cv_params,
-                categorical_features=categorical_features
+                categorical_features=categorical_features,
+                task_type=task_type
             )
             summary[model_name] = metrics
         
     print("\n" + "="*50)
-    print("🏁 TRAINING COMPLETE SUMMARY (Tuned Thresholds)")
+    print(f"🏁 TRAINING COMPLETE SUMMARY ({task_type})")
     print("="*50)
     summary_df = pd.DataFrame(summary).T
     print(summary_df)
     
-
-
 if __name__ == "__main__":
     main()
