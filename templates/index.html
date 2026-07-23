@@ -202,7 +202,7 @@
 
                     <button type="submit" id="submitBtn" class="submit-btn">
                         <i data-lucide="sparkles" style="width:1.1rem; height:1.1rem"></i>
-                        <span>Run ONNX Predictor</span>
+                        <span>Run Predictor</span>
                     </button>
                 </form>
             </div>
@@ -215,7 +215,7 @@
             <div class="dashboard-card result-container">
                 <div class="result-card-inner">
                     <div class="result-card-header">
-                        <span>Risk Assessment Profile</span>
+                        <span>Delivery Time Prediction</span>
                         <span id="badge" class="badge-onnx">ONNX CORE</span>
                     </div>
 
@@ -234,7 +234,7 @@
                             <div class="loader-ring"></div>
                             <div class="loader-ring-inner"></div>
                         </div>
-                        <p style="font-weight: 600; color: var(--text-secondary);">Invoking XGBoost Model Pipeline...</p>
+                        <p style="font-weight: 600; color: var(--text-secondary);">Invoking Model ...</p>
                     </div>
 
                     <!-- Result Panel with Gauge dial -->
@@ -249,8 +249,8 @@
                                 <path id="gaugeFill" class="gauge-fill" d="M 10 50 A 40 40 0 0 1 90 50" fill="none" stroke-width="8" stroke-dasharray="125.6" stroke-dashoffset="125.6"></path>
                             </svg>
                             <div class="gauge-center-text">
-                                <span id="gaugeProbText">0%</span>
-                                <p>Probability</p>
+                                <span id="gaugeProbText">0 Days</span>
+                                <p>Predicted Time</p>
                             </div>
                         </div>
 
@@ -286,7 +286,7 @@
                 <div class="chart-header">
                     <h3>
                         <i data-lucide="bar-chart-2" style="width:1rem; height:1rem; color:var(--primary)"></i>
-                        Avg. Delay Rates (Historical)
+                        Avg. Delivery Delay (Days)
                     </h3>
                     <span>Real-Time Data</span>
                 </div>
@@ -297,43 +297,43 @@
                     
                     <div class="chart-column">
                         <div class="chart-bar-pillar" style="height: 35px;">
-                            <div class="chart-bar-tooltip">8.5%</div>
+                            <div class="chart-bar-tooltip">8.5d</div>
                         </div>
                         <span class="chart-label-text">Jan</span>
                     </div>
                     <div class="chart-column">
                         <div class="chart-bar-pillar" style="height: 42px;">
-                            <div class="chart-bar-tooltip">9.2%</div>
+                            <div class="chart-bar-tooltip">9.2d</div>
                         </div>
                         <span class="chart-label-text">Feb</span>
                     </div>
                     <div class="chart-column">
                         <div class="chart-bar-pillar" style="height: 65px;">
-                            <div class="chart-bar-tooltip">12.4%</div>
+                            <div class="chart-bar-tooltip">12.4d</div>
                         </div>
                         <span class="chart-label-text">Mar</span>
                     </div>
                     <div class="chart-column">
                         <div class="chart-bar-pillar" style="height: 31px;">
-                            <div class="chart-bar-tooltip">7.1%</div>
+                            <div class="chart-bar-tooltip">7.1d</div>
                         </div>
                         <span class="chart-label-text">Apr</span>
                     </div>
                     <div class="chart-column">
                         <div class="chart-bar-pillar" style="height: 85px;">
-                            <div class="chart-bar-tooltip">14.8%</div>
+                            <div class="chart-bar-tooltip">14.8d</div>
                         </div>
                         <span class="chart-label-text">May</span>
                     </div>
                     <div class="chart-column">
                         <div class="chart-bar-pillar" style="height: 25px;">
-                            <div class="chart-bar-tooltip">6.2%</div>
+                            <div class="chart-bar-tooltip">6.2d</div>
                         </div>
                         <span class="chart-label-text">Jun</span>
                     </div>
                     <div class="chart-column">
                         <div class="chart-bar-pillar" style="height: 48px;">
-                            <div class="chart-bar-tooltip">9.8%</div>
+                            <div class="chart-bar-tooltip">9.8d</div>
                         </div>
                         <span class="chart-label-text">Jul</span>
                     </div>
