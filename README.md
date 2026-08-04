@@ -24,8 +24,6 @@ graph TD
 ### 1. Data & Preprocessing Pipeline
 * **Input Features**: Telemetry features such as `price`, `freight_value`, `product_category_name`, dimensions/weight (to calculate volumetric cargo indices), routing tags (`is_same_state`), and temporal contexts (purchase month, weekday, hour).
 * **Preprocessing**: 
-  * **Numeric**: Median imputation and Standard Scaling.
-  * **Categorical**: One-Hot Encoding (OHE).
 
 ### 2. ONNX Model Optimization (`src/selected_model/XGB_model.py`)
 * The raw Scikit-Learn pipeline (preprocessing + XGBoost) is trained on historical data.
@@ -51,21 +49,6 @@ python3 -m venv ml_venv
 source ml_venv/bin/activate
 pip install -r requirements.txt
 ```
-
-### 2. Training and Exporting ONNX Model
-To run feature engineering, train the model, convert it to ONNX, and log variables to MLflow:
-```bash
-PYTHONPATH=. python src/selected_model/XGB_model.py
-```
-
-### 3. Running Backend Locally
-To start the Uvicorn web server locally:
-```bash
-python APP/main.py
-```
-The server will boot on `http://localhost:8000`. You can access automated API documentation at `http://localhost:8000/docs`.
-
----
 
 ## 🚀 Cloud Deployment
 
