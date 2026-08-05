@@ -4,6 +4,12 @@ MLOPS PROJECT
 
 **🎥 Demo:** [Click Here](https://drive.google.com/file/d/1sMrfMuqEKOs6c3A1kLbtJh3_lWb9K6_M/view?usp=drive_link)
 
+### Web Page
+![Home Page](templates/Screenshot%202026-08-05%20210246.png)
+
+### MLFLOW Experiment Tracking
+![Prediction Result](templates/Screenshot%202026-08-05%20210540.png)
+
 This project is an end-to-end MLOps pipeline designed to predict transit delay risks for e-commerce deliveries...
 
 This project is an end-to-end MLOps pipeline designed to predict transit delay risks for e-commerce deliveries. It utilizes a trained **XGBoost Classifier** wrapped in a **Scikit-Learn Preprocessing Pipeline**, converts it to **ONNX format** for lightweight production deployment, and exposes it via a **FastAPI backend** paired with a **responsive web interface**.
