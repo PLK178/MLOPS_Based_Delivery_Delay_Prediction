@@ -2,6 +2,9 @@ MLOPS PROJECT
 
 # E-Commerce Delivery Delay Predictor (MLOps)
 
+🔗 **Project Demo / Report:**  
+https://drive.google.com/file/d/1sMrfMuqEKOs6c3A1kLbtJh3_lWb9K6_M/view?usp=drive_link
+
 This project is an end-to-end MLOps pipeline designed to predict transit delay risks for e-commerce deliveries. It utilizes a trained **XGBoost Classifier** wrapped in a **Scikit-Learn Preprocessing Pipeline**, converts it to **ONNX format** for lightweight production deployment, and exposes it via a **FastAPI backend** paired with a **responsive web interface**.
 
 ---
